@@ -45,7 +45,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="card">
         <div class="icon-header"><i class="fa-solid fa-server"></i></div>
-        <h2>隧道管理面板</h2>
+        <h2>Cloudflared隧道管理面板</h2>
         <p class="sub">运行时将锁定输入框，保护配置安全</p>
         
         <form method="post">
