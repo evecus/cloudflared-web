@@ -7,7 +7,6 @@ import re
 app = Flask(__name__)
 tunnel_process = None
 LOG_FILE = "tunnel.log"
-# 预留挂载目录下的 token 文件路径
 TOKEN_PATH = "token" 
 
 # --- 界面设计 ---
@@ -20,43 +19,99 @@ HTML_TEMPLATE = """
     <title>Cloudflared Dashboard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        :root { --primary: #6366f1; --success: #22c55e; --danger: #ef4444; }
-        body { font-family: 'PingFang SC', sans-serif; background: #f0f2f5; margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-        .card { background: white; border-radius: 24px; padding: 35px; width: 90%; max-width: 440px; box-shadow: 0 20px 40px rgba(0,0,0,0.05); text-align: center; }
-        .icon-header { font-size: 40px; color: var(--primary); margin-bottom: 10px; }
-        h2 { margin: 0; color: #1e293b; }
-        .sub { color: #94a3b8; font-size: 13px; margin-bottom: 20px; }
-        textarea { width: 100%; padding: 15px; border-radius: 15px; border: 2px solid #f1f5f9; outline: none; box-sizing: border-box; font-family: monospace; font-size: 12px; background: #f8fafc; resize: none; }
-        textarea:disabled { background: #e2e8f0; cursor: not-allowed; color: #64748b; }
-        .btn-group { display: flex; gap: 10px; margin-top: 15px; flex-wrap: wrap; }
-        button { flex: 1; min-width: 100px; padding: 12px; border-radius: 12px; border: none; cursor: pointer; font-weight: 600; transition: 0.3s; display: flex; align-items: center; justify-content: center; gap: 5px; }
-        .run { background: var(--primary); color: white; }
+        :root { 
+            --cf-orange: #f38020; 
+            --cf-blue: #0051ad;
+            --success: #22c55e; 
+            --danger: #ef4444; 
+        }
+        body { 
+            font-family: 'PingFang SC', 'Helvetica Neue', sans-serif; 
+            background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 50%, #dbeafe 100%);
+            margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh;
+        }
+        .card { 
+            background: rgba(255, 255, 255, 0.85); 
+            backdrop-filter: blur(20px);
+            border-radius: 32px; 
+            padding: 40px; 
+            width: 90%; max-width: 450px; 
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.1);
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.4);
+        }
+        .icon-header { 
+            font-size: 55px; 
+            color: var(--cf-orange); 
+            margin-bottom: 20px;
+            filter: drop-shadow(0 5px 10px rgba(243, 128, 32, 0.3));
+        }
+        h2 { margin: 0; color: #1e293b; font-weight: 800; font-size: 24px; }
+        .sub { color: #64748b; font-size: 14px; margin: 10px 0 25px; line-height: 1.5; }
+        
+        textarea { 
+            width: 100%; padding: 18px; border-radius: 20px; 
+            border: 2px solid #e2e8f0; outline: none; transition: 0.3s;
+            box-sizing: border-box; font-family: 'Fira Code', monospace; 
+            font-size: 13px; background: rgba(248, 250, 262, 0.8); resize: none;
+            color: #334155;
+        }
+        textarea:focus { border-color: var(--cf-orange); background: #fff; box-shadow: 0 0 0 4px rgba(243, 128, 32, 0.1); }
+        textarea:disabled { background: #f1f5f9; cursor: not-allowed; opacity: 0.7; }
+        
+        .btn-group { display: flex; gap: 12px; margin-top: 25px; flex-wrap: wrap; }
+        button { 
+            flex: 1; padding: 14px; border-radius: 16px; border: none; 
+            cursor: pointer; font-weight: 700; font-size: 15px;
+            display: flex; align-items: center; justify-content: center; gap: 8px; 
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .save { background: #fff; color: #1e293b; border: 2px solid #e2e8f0; }
+        .save:hover { background: #f8fafc; border-color: #cbd5e1; }
+        
+        .run { background: linear-gradient(135deg, var(--cf-orange), #faad14); color: white; }
+        .run:hover { transform: translateY(-3px); box-shadow: 0 10px 20px rgba(243, 128, 32, 0.3); }
+        
         .stop { background: #fee2e2; color: var(--danger); }
-        .save { background: #f1f5f9; color: #1e293b; border: 1px solid #e2e8f0; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
-        .status-bar { margin-top: 20px; padding: 15px; border-radius: 15px; font-weight: 600; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 8px; }
-        .success { background: #dcfce7; color: #15803d; }
-        .fail { background: #fef2f2; color: #991b1b; }
-        .info { background: #f1f5f9; color: #475569; }
-        .dot { width: 8px; height: 8px; background: currentColor; border-radius: 50%; animation: blink 1s infinite; }
-        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+        .stop:hover { background: #fecaca; }
+
+        .status-bar { 
+            margin-top: 30px; padding: 18px; border-radius: 20px; 
+            font-weight: 700; font-size: 14px; 
+            display: flex; align-items: center; justify-content: center; gap: 10px; 
+            animation: slideUp 0.5s ease;
+        }
+        .success { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+        .fail { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+        .info { background: #f0f9ff; color: #0369a1; border: 1px solid #bae6fd; }
+        
+        @keyframes slideUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+        
+        .dot { width: 10px; height: 10px; background: currentColor; border-radius: 50%; position: relative; }
+        .dot::after {
+            content: ""; position: absolute; width: 100%; height: 100%;
+            background: inherit; border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(3); opacity: 0; } }
     </style>
 </head>
 <body>
     <div class="card">
-        <div class="icon-header"><i class="fa-solid fa-server"></i></div>
+        <div class="icon-header"><i class="fa-brands fa-cloudflare"></i></div>
         <h2>Cloudflared隧道管理面板</h2>
-        <p class="sub">运行时将锁定输入框，保护配置安全</p>
+        <p class="sub">支持 Token 或 Docker 命令自动识别。</p>
         
         <form method="post">
-            <textarea name="raw_input" rows="4" placeholder="粘贴 Token 或 Docker 命令..." {{ 'disabled' if is_running }}>{{ current_token }}</textarea>
+            <textarea name="raw_input" rows="4" placeholder="在此粘贴内容..." {{ 'disabled' if is_running }}>{{ current_token }}</textarea>
             
             <div class="btn-group">
                 {% if not is_running %}
-                    <button type="submit" name="action" value="save" class="save"><i class="fa-solid fa-floppy-disk"></i> 保存配置</button>
-                    <button type="submit" name="action" value="start" class="run"><i class="fa-solid fa-play"></i> 启动隧道</button>
+                    <button type="submit" name="action" value="save" class="save"><i class="fa-solid fa-cloud-arrow-up"></i> 保存</button>
+                    <button type="submit" name="action" value="start" class="run"><i class="fa-solid fa-bolt"></i> 启动隧道</button>
                 {% else %}
-                    <button type="submit" name="action" value="stop" class="stop"><i class="fa-solid fa-stop"></i> 停止隧道</button>
+                    <button type="submit" name="action" value="stop" class="stop"><i class="fa-solid fa-power-off"></i> 停止隧道</button>
                 {% endif %}
             </div>
         </form>
@@ -64,6 +119,7 @@ HTML_TEMPLATE = """
         {% if message %}
         <div class="status-bar {{ msg_class }}">
             {% if '成功' in message %}<div class="dot"></div>{% endif %}
+            <i class="fa-solid {{ 'fa-circle-check' if '成功' in message else 'fa-circle-exclamation' }}"></i>
             {{ message }}
         </div>
         {% endif %}
@@ -87,7 +143,6 @@ def load_saved_token():
 def index():
     global tunnel_process
     message, msg_class = "", "info"
-    # 页面初始加载已保存的 Token
     current_token = load_saved_token()
     is_running = tunnel_process is not None and tunnel_process.poll() is None
 
@@ -101,14 +156,12 @@ def index():
                 with open(TOKEN_PATH, "w") as f:
                     f.write(token)
                 current_token = token
-                message, msg_class = "Token已成功保存", "info"
+                message, msg_class = "Token已同步保存", "info"
             else:
-                message, msg_class = "请输入有效Token", "fail"
+                message, msg_class = "保存失败：输入内容为空", "fail"
 
         elif action == 'start' and not is_running:
-            # 优先使用当前输入的内容，如果为空则使用已保存的
             token_to_run = extract_token(raw_input) if raw_input else current_token
-            
             if token_to_run:
                 with open(LOG_FILE, "w") as f: f.write("")
                 log_f = open(LOG_FILE, "a")
@@ -121,11 +174,11 @@ def index():
                     logs = f.read()
                     if "Connected" in logs or "Registered" in logs:
                         message, msg_class, is_running = "cloudflared隧道连接成功", "success", True
-                        current_token = token_to_run # 运行成功同步显示
+                        current_token = token_to_run
                     else:
-                        message, msg_class = "cloudflared隧道连接失败，请检查Token", "fail"
+                        message, msg_class = "连接失败，请检查Token有效性", "fail"
             else:
-                message, msg_class = "没有可用的 Token，请先输入或保存", "fail"
+                message, msg_class = "未检测到有效Token", "fail"
 
         elif action == 'stop':
             if tunnel_process:
@@ -133,7 +186,7 @@ def index():
                 tunnel_process.wait()
                 tunnel_process = None
                 is_running = False
-                message = "cloudflared隧道已断开"
+                message = "隧道已安全断开"
 
     return render_template_string(
         HTML_TEMPLATE, 
@@ -144,7 +197,6 @@ def index():
     )
 
 if __name__ == '__main__':
-    # 启动时自动检查是否有保存的文件并尝试静默启动
     saved = load_saved_token()
     if saved:
         log_f = open(LOG_FILE, "a")
