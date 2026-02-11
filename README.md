@@ -1,6 +1,9 @@
 docker run -d \
   --name cf-manager \
   --restart always \
-  -p 1450:1450 \
+  --network host \
   -v /cf-config:/app \
   ghcr.io/evecus/cloudflared-web:latest
+
+
+  port:12222
