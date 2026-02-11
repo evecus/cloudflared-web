@@ -101,9 +101,9 @@ def index():
                 with open(TOKEN_PATH, "w") as f:
                     f.write(token)
                 current_token = token
-                message, msg_class = "配置已成功保存到挂载目录", "info"
+                message, msg_class = "Token已成功保存", "info"
             else:
-                message, msg_class = "请输入有效内容后再保存", "fail"
+                message, msg_class = "请输入有效Token", "fail"
 
         elif action == 'start' and not is_running:
             # 优先使用当前输入的内容，如果为空则使用已保存的
