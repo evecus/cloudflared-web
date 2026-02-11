@@ -1,133 +1,172 @@
 from flask import Flask, request, render_template_string
 import subprocess
 import os
-import signal
+import time
 
 app = Flask(__name__)
 tunnel_process = None
 LOG_FILE = "tunnel.log"
 
-# HTML 模板：增加了自动刷新和更好的样式
+# --- HTML 界面设计 ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cloudflared Manager</title>
+    <title>Cloudflared 控制面板</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        body { font-family: -apple-system, sans-serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }
-        .card { border: 1px solid #ddd; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        input { padding: 12px; width: 80%; border: 1px solid #ccc; border-radius: 4px; margin-bottom: 15px; font-family: monospace; }
-        .controls { margin: 20px 0; }
-        button { padding: 10px 25px; cursor: pointer; border: none; border-radius: 4px; font-weight: bold; transition: 0.3s; }
-        .btn-start { background-color: #28a745; color: white; }
-        .btn-start:hover { background-color: #218838; }
-        .btn-stop { background-color: #dc3545; color: white; margin-left: 10px; }
-        .btn-stop:hover { background-color: #c82333; }
-        .status { font-size: 1.2em; margin-bottom: 10px; }
-        .status.on { color: #28a745; }
-        .status.off { color: #dc3545; }
-        pre { background: #2d2d2d; color: #ccc; padding: 15px; height: 400px; overflow-y: auto; border-radius: 4px; font-size: 13px; line-height: 1.4; }
-        h2 { margin-top: 0; color: #333; }
+        :root {
+            --primary: #6366f1;
+            --success: #22c55e;
+            --danger: #ef4444;
+            --bg: #f8fafc;
+        }
+        body { 
+            font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif; 
+            background: var(--bg);
+            margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh;
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(10px);
+            border-radius: 24px;
+            padding: 40px;
+            width: 90%; max-width: 450px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            text-align: center;
+        }
+        .logo { font-size: 48px; color: var(--primary); margin-bottom: 20px; }
+        h2 { margin: 10px 0; color: #1e293b; }
+        .input-group { margin: 30px 0; position: relative; }
+        input {
+            width: 100%; padding: 12px 15px; border-radius: 12px;
+            border: 2px solid #e2e8f0; outline: none; transition: 0.3s;
+            box-sizing: border-box; font-family: monospace;
+        }
+        input:focus { border-color: var(--primary); box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1); }
+        
+        .btn-group { display: flex; gap: 15px; justify-content: center; }
+        button {
+            padding: 12px 28px; border-radius: 12px; border: none;
+            cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 8px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .run-btn { background: linear-gradient(135deg, #6366f1, #a855f7); color: white; }
+        .run-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.4); }
+        .stop-btn { background: #fee2e2; color: #ef4444; }
+        .stop-btn:hover { background: #fecaca; }
+
+        .status-card {
+            margin-top: 30px; padding: 20px; border-radius: 16px;
+            font-size: 16px; font-weight: bold;
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+        }
+        .status-success { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+        .status-fail { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
+        .status-info { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+        
+        .pulse {
+            width: 10px; height: 10px; border-radius: 50%;
+            background: currentColor; animation: pulse-animation 2s infinite;
+        }
+        @keyframes pulse-animation {
+            0% { box-shadow: 0 0 0 0px rgba(34, 197, 94, 0.4); }
+            100% { box-shadow: 0 0 0 10px rgba(34, 197, 94, 0); }
+        }
     </style>
 </head>
 <body>
-    <div class="card">
+    <div class="container">
+        <div class="logo"><i class="fa-solid fa-cloud-bolt"></i></div>
         <h2>Cloudflared 隧道管理</h2>
-        
+        <p style="color: #64748b; font-size: 14px;">请输入 Token 启动加密通道</p>
+
         <form method="post">
-            <input type="text" name="token" placeholder="在此粘贴你的 Cloudflare Tunnel Token" value="{{ token }}">
-            <div class="controls">
-                <button type="submit" name="action" value="start" class="btn-start">▶ 运行</button>
-                <button type="submit" name="action" value="stop" class="btn-stop">■ 停止</button>
+            <div class="input-group">
+                <input type="text" name="token" placeholder="Tunnel Token..." value="{{ token }}" autocomplete="off">
+            </div>
+            <div class="btn-group">
+                <button type="submit" name="action" value="start" class="run-btn">
+                    <i class="fa-solid fa-play"></i> 运行
+                </button>
+                <button type="submit" name="action" value="stop" class="stop-btn">
+                    <i class="fa-solid fa-power-off"></i> 停止
+                </button>
             </div>
         </form>
 
-        <div class="status {{ 'on' if '运行' in status else 'off' }}">
-            当前状态: {{ status }}
+        {% if message %}
+        <div class="status-card {{ msg_class }}">
+            {% if '成功' in message %}<div class="pulse"></div>{% endif %}
+            <i class="{{ icon }}"></i> {{ message }}
         </div>
-
-        <h3>运行日志:</h3>
-        <pre id="log-container">{{ logs }}</pre>
-    </div>
-
-    <script>
-        // 自动滚动日志到底部
-        const logBox = document.getElementById('log-container');
-        logBox.scrollTop = logBox.scrollHeight;
-
-        // 如果正在运行，每 3 秒刷新一次页面以获取最新日志
-        {% if '运行' in status %}
-        setTimeout(() => {
-            window.location.reload();
-        }, 3000);
         {% endif %}
-    </script>
+    </div>
 </body>
 </html>
 """
 
+def check_tunnel_status():
+    """检查日志文件确定连接是否成功"""
+    if not os.path.exists(LOG_FILE):
+        return "wait"
+    with open(LOG_FILE, "r") as f:
+        content = f.read()
+        if "Connected" in content or "Registered" in content:
+            return "success"
+        if "error" in content.lower() or "failed" in content.lower():
+            return "fail"
+    return "wait"
+
 @app.route('/', methods=['GET', 'POST'])
 def index():
     global tunnel_process
+    message = ""
+    msg_class = "status-info"
+    icon = "fa-solid fa-circle-info"
     token = request.form.get('token', '')
 
     if request.method == 'POST':
         action = request.form.get('action')
         
         if action == 'start' and token:
-            # 1. 如果已有进程，先彻底关闭
-            if tunnel_process and tunnel_process.poll() is None:
+            if tunnel_process:
                 tunnel_process.terminate()
-                tunnel_process.wait()
             
-            # 2. 清空并准备日志文件
-            with open(LOG_FILE, "w") as f:
-                f.write("--- 正在启动 Cloudflared ---\n")
-            
-            # 3. 启动进程：使用正确的子命令逻辑
-            # 命令格式: cloudflared tunnel run --token <TOKEN>
+            with open(LOG_FILE, "w") as f: f.write("")
             log_f = open(LOG_FILE, "a")
-            try:
-                tunnel_process = subprocess.Popen(
-                    ['cloudflared', 'tunnel', 'run', '--token', token.strip()],
-                    stdout=log_f,
-                    stderr=log_f,
-                    text=True
-                )
-            except Exception as e:
-                with open(LOG_FILE, "a") as f:
-                    f.write(f"启动异常: {str(e)}")
+            
+            tunnel_process = subprocess.Popen(
+                ['cloudflared', 'tunnel', 'run', '--token', token.strip()],
+                stdout=log_f, stderr=log_f, text=True
+            )
+            
+            # 给一点点启动时间然后检测
+            time.sleep(2)
+            res = check_tunnel_status()
+            if res == "success":
+                message = "Cloudflared 隧道连接成功"
+                msg_class = "status-success"
+                icon = "fa-solid fa-check-circle"
+            else:
+                message = "Cloudflared 隧道连接失败，请重试"
+                msg_class = "status-fail"
+                icon = "fa-solid fa-circle-xmark"
 
         elif action == 'stop':
             if tunnel_process:
                 tunnel_process.terminate()
                 tunnel_process.wait()
                 tunnel_process = None
-                with open(LOG_FILE, "a") as f:
-                    f.write("\n--- 服务已手动停止 ---\n")
+                message = "Cloudflared 隧道已断开"
+                msg_class = "status-info"
+                icon = "fa-solid fa-link-slash"
+            else:
+                message = "隧道当前未运行"
 
-    # 获取当前状态
-    is_running = tunnel_process and tunnel_process.poll() is None
-    status_text = "🟢 正在运行" if is_running else "🔴 已停止"
-    
-    # 读取日志
-    logs = ""
-    if os.path.exists(LOG_FILE):
-        try:
-            with open(LOG_FILE, "r") as f:
-                logs = f.read()
-        except:
-            logs = "无法读取日志文件"
-
-    return render_template_string(
-        HTML_TEMPLATE, 
-        status=status_text, 
-        token=token, 
-        logs=logs
-    )
+    return render_template_string(HTML_TEMPLATE, token=token, message=message, msg_class=msg_class, icon=icon)
 
 if __name__ == '__main__':
-    # 按照你的要求，固定端口 1450
-    app.run(host='0.0.0.0', port=1450, debug=False)
+    app.run(host='0.0.0.0', port=1450)
