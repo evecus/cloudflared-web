@@ -100,7 +100,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="card">
         <div class="icon-header"><i class="fa-brands fa-cloudflare"></i></div>
-        <h2>Cloudflared隧道管理</h2>
+        <h2>Cloudflared隧道管理面板</h2>
         <p class="sub">支持 Token 或 Docker 命令输入</p>
         
         <form method="post">
