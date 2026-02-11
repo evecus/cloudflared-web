@@ -133,7 +133,7 @@ def index():
                 tunnel_process.wait()
                 tunnel_process = None
                 is_running = False
-                message = "cloudflared隧道已断开，输入框已解锁"
+                message = "cloudflared隧道已断开"
 
     return render_template_string(
         HTML_TEMPLATE, 
