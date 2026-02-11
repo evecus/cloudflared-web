@@ -100,8 +100,8 @@ HTML_TEMPLATE = """
 <body>
     <div class="card">
         <div class="icon-header"><i class="fa-brands fa-cloudflare"></i></div>
-        <h2>Cloudflared隧道管理面板</h2>
-        <p class="sub">支持 Token 或 Docker 命令自动识别。</p>
+        <h2>Cloudflared隧道管理</h2>
+        <p class="sub">支持 Token 或 Docker 命令输入</p>
         
         <form method="post">
             <textarea name="raw_input" rows="4" placeholder="在此粘贴内容..." {{ 'disabled' if is_running }}>{{ current_token }}</textarea>
@@ -111,7 +111,7 @@ HTML_TEMPLATE = """
                     <button type="submit" name="action" value="save" class="save"><i class="fa-solid fa-cloud-arrow-up"></i> 保存</button>
                     <button type="submit" name="action" value="start" class="run"><i class="fa-solid fa-bolt"></i> 启动隧道</button>
                 {% else %}
-                    <button type="submit" name="action" value="stop" class="stop"><i class="fa-solid fa-power-off"></i> 停止隧道</button>
+                    <button type="submit" name="action" value="stop" class="stop"><i class="fa-solid fa-power-off"></i> 断开隧道连接</button>
                 {% endif %}
             </div>
         </form>
