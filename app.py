@@ -123,7 +123,7 @@ def extract_token(text):
     cleaned = text.replace('\\', '').replace('\n', '').replace('\r', '').replace('\t', '').strip()
     
     # 正则搜索：寻找以 eyJhI 开头的长字符串
-    match = re.search(r'eyJhS[a-zA-Z0-9\-_]{50,}', cleaned)
+    match = re.search(r'eyJh[a-zA-Z0-9\-_]{50,}', cleaned)
     if match:
         return match.group(0)
     return cleaned
