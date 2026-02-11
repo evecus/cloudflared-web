@@ -6,120 +6,117 @@ import re
 
 app = Flask(__name__)
 tunnel_process = None
-LOG_FILE = "tunnel.log"
-TOKEN_PATH = "token" 
 
-# --- 界面设计 ---
+# --- 核心路径修改：指向挂载的 data 目录 ---
+DATA_DIR = "/app/data"
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
+
+TOKEN_PATH = os.path.join(DATA_DIR, "token")
+LOG_FILE = os.path.join(DATA_DIR, "tunnel.log")
+
+# --- 极美 UI 设计 (深色科技渐变 + 品牌图标) ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cloudflared Dashboard</title>
+    <title>Cloudflared Manager Pro</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         :root { 
-            --cf-orange: #f38020; 
-            --cf-blue: #0051ad;
-            --success: #22c55e; 
-            --danger: #ef4444; 
+            --cf-orange: #F38020; 
+            --success: #10B981; 
+            --danger: #EF4444; 
         }
         body { 
-            font-family: 'PingFang SC', 'Helvetica Neue', sans-serif; 
-            background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 50%, #dbeafe 100%);
+            font-family: 'PingFang SC', system-ui, sans-serif; 
+            /* 绚丽的深色背景 */
+            background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e1b4b 100%);
             margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh;
+            color: #fff;
         }
-        .card { 
-            background: rgba(255, 255, 255, 0.85); 
+        .container { 
+            background: rgba(255, 255, 255, 0.08); 
             backdrop-filter: blur(20px);
-            border-radius: 32px; 
+            border-radius: 30px; 
             padding: 40px; 
             width: 90%; max-width: 450px; 
-            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.1);
+            box-shadow: 0 25px 50px rgba(0,0,0,0.5);
             text-align: center;
-            border: 1px solid rgba(255, 255, 255, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.1);
         }
-        .icon-header { 
-            font-size: 55px; 
+        .cf-logo { 
+            font-size: 60px; 
             color: var(--cf-orange); 
             margin-bottom: 20px;
-            filter: drop-shadow(0 5px 10px rgba(243, 128, 32, 0.3));
+            filter: drop-shadow(0 0 15px rgba(243, 128, 32, 0.4));
         }
-        h2 { margin: 0; color: #1e293b; font-weight: 800; font-size: 24px; }
-        .sub { color: #64748b; font-size: 14px; margin: 10px 0 25px; line-height: 1.5; }
+        h2 { margin: 0; font-weight: 800; font-size: 26px; letter-spacing: -1px; }
+        .sub-desc { color: rgba(255,255,255,0.6); font-size: 13px; margin: 10px 0 30px; }
         
         textarea { 
             width: 100%; padding: 18px; border-radius: 20px; 
-            border: 2px solid #e2e8f0; outline: none; transition: 0.3s;
+            border: 1px solid rgba(255,255,255,0.2); outline: none; transition: 0.3s;
             box-sizing: border-box; font-family: 'Fira Code', monospace; 
-            font-size: 13px; background: rgba(248, 250, 262, 0.8); resize: none;
-            color: #334155;
+            font-size: 13px; background: rgba(0, 0, 0, 0.3); resize: none;
+            color: #fff; line-height: 1.5;
         }
-        textarea:focus { border-color: var(--cf-orange); background: #fff; box-shadow: 0 0 0 4px rgba(243, 128, 32, 0.1); }
-        textarea:disabled { background: #f1f5f9; cursor: not-allowed; opacity: 0.7; }
+        textarea:focus { border-color: var(--cf-orange); background: rgba(0,0,0,0.5); }
+        textarea:disabled { opacity: 0.5; cursor: not-allowed; background: rgba(255,255,255,0.05); }
         
-        .btn-group { display: flex; gap: 12px; margin-top: 25px; flex-wrap: wrap; }
+        .btn-group { display: flex; gap: 12px; margin-top: 25px; }
         button { 
             flex: 1; padding: 14px; border-radius: 16px; border: none; 
             cursor: pointer; font-weight: 700; font-size: 15px;
             display: flex; align-items: center; justify-content: center; gap: 8px; 
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: 0.3s;
         }
-        
-        .save { background: #fff; color: #1e293b; border: 2px solid #e2e8f0; }
-        .save:hover { background: #f8fafc; border-color: #cbd5e1; }
-        
-        .run { background: linear-gradient(135deg, var(--cf-orange), #faad14); color: white; }
-        .run:hover { transform: translateY(-3px); box-shadow: 0 10px 20px rgba(243, 128, 32, 0.3); }
-        
-        .stop { background: #fee2e2; color: var(--danger); }
-        .stop:hover { background: #fecaca; }
+        .btn-save { background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.1); }
+        .btn-save:hover { background: rgba(255,255,255,0.2); }
+        .btn-run { background: var(--cf-orange); color: white; }
+        .btn-run:hover { transform: translateY(-3px); box-shadow: 0 10px 20px rgba(243, 128, 32, 0.4); }
+        .btn-stop { background: var(--danger); color: white; }
 
-        .status-bar { 
-            margin-top: 30px; padding: 18px; border-radius: 20px; 
-            font-weight: 700; font-size: 14px; 
-            display: flex; align-items: center; justify-content: center; gap: 10px; 
-            animation: slideUp 0.5s ease;
+        .status-msg { 
+            margin-top: 25px; padding: 16px; border-radius: 18px; 
+            font-weight: 600; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 10px;
+            background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.05);
         }
-        .success { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
-        .fail { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
-        .info { background: #f0f9ff; color: #0369a1; border: 1px solid #bae6fd; }
+        .status-success { color: #4ade80; border-color: rgba(74, 222, 128, 0.2); }
+        .status-fail { color: #f87171; border-color: rgba(248, 113, 113, 0.2); }
         
-        @keyframes slideUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
-        
-        .dot { width: 10px; height: 10px; background: currentColor; border-radius: 50%; position: relative; }
-        .dot::after {
+        .pulse { width: 10px; height: 10px; background: #4ade80; border-radius: 50%; position: relative; }
+        .pulse::after {
             content: ""; position: absolute; width: 100%; height: 100%;
-            background: inherit; border-radius: 50%;
-            animation: pulse 1.5s infinite;
+            background: inherit; border-radius: 50%; animation: wave 1.5s infinite;
         }
-        @keyframes pulse { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(3); opacity: 0; } }
+        @keyframes wave { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(3); opacity: 0; } }
     </style>
 </head>
 <body>
-    <div class="card">
-        <div class="icon-header"><i class="fa-brands fa-cloudflare"></i></div>
+    <div class="container">
+        <div class="cf-logo"><i class="fa-brands fa-cloudflare"></i></div>
         <h2>Cloudflared隧道管理面板</h2>
-        <p class="sub">支持 Token 或 Docker 命令输入</p>
+        <p class="sub-desc">Token持久化保存</p>
         
         <form method="post">
-            <textarea name="raw_input" rows="4" placeholder="在此粘贴内容..." {{ 'disabled' if is_running }}>{{ current_token }}</textarea>
+            <textarea name="raw_input" rows="4" placeholder="粘贴 Token 或 Docker 命令..." {{ 'disabled' if is_running }}>{{ current_token }}</textarea>
             
             <div class="btn-group">
                 {% if not is_running %}
-                    <button type="submit" name="action" value="save" class="save"><i class="fa-solid fa-cloud-arrow-up"></i> 保存</button>
-                    <button type="submit" name="action" value="start" class="run"><i class="fa-solid fa-bolt"></i> 启动隧道</button>
+                    <button type="submit" name="action" value="save" class="btn-save"><i class="fa-solid fa-save"></i> 保存</button>
+                    <button type="submit" name="action" value="start" class="btn-run"><i class="fa-solid fa-play"></i> 启动隧道</button>
                 {% else %}
-                    <button type="submit" name="action" value="stop" class="stop"><i class="fa-solid fa-power-off"></i> 断开隧道连接</button>
+                    <button type="submit" name="action" value="stop" class="btn-stop"><i class="fa-solid fa-stop"></i> 停止连接</button>
                 {% endif %}
             </div>
         </form>
 
         {% if message %}
-        <div class="status-bar {{ msg_class }}">
-            {% if '成功' in message %}<div class="dot"></div>{% endif %}
-            <i class="fa-solid {{ 'fa-circle-check' if '成功' in message else 'fa-circle-exclamation' }}"></i>
+        <div class="status-msg {{ 'status-success' if '成功' in message else 'status-fail' if '失败' in message else '' }}">
+            {% if '成功' in message %}<div class="pulse"></div>{% endif %}
             {{ message }}
         </div>
         {% endif %}
@@ -142,7 +139,7 @@ def load_saved_token():
 @app.route('/', methods=['GET', 'POST'])
 def index():
     global tunnel_process
-    message, msg_class = "", "info"
+    message, msg_class = "", ""
     current_token = load_saved_token()
     is_running = tunnel_process is not None and tunnel_process.poll() is None
 
@@ -151,14 +148,13 @@ def index():
         raw_input = request.form.get('raw_input', '').strip()
 
         if action == 'save' and not is_running:
-            if raw_input:
-                token = extract_token(raw_input)
-                with open(TOKEN_PATH, "w") as f:
-                    f.write(token)
+            token = extract_token(raw_input)
+            if token:
+                with open(TOKEN_PATH, "w") as f: f.write(token)
                 current_token = token
-                message, msg_class = "Token已同步保存", "info"
+                message = "Token已保存"
             else:
-                message, msg_class = "保存失败：输入内容为空", "fail"
+                message = "保存失败：未检测到有效Token"
 
         elif action == 'start' and not is_running:
             token_to_run = extract_token(raw_input) if raw_input else current_token
@@ -173,12 +169,12 @@ def index():
                 with open(LOG_FILE, "r") as f:
                     logs = f.read()
                     if "Connected" in logs or "Registered" in logs:
-                        message, msg_class, is_running = "cloudflared隧道连接成功", "success", True
+                        message, is_running = "cloudflared隧道连接成功", True
                         current_token = token_to_run
                     else:
-                        message, msg_class = "连接失败，请检查Token有效性", "fail"
+                        message = "cloudflared隧道连接失败，请重试"
             else:
-                message, msg_class = "未检测到有效Token", "fail"
+                message = "启动失败：缺少有效Token"
 
         elif action == 'stop':
             if tunnel_process:
@@ -186,15 +182,9 @@ def index():
                 tunnel_process.wait()
                 tunnel_process = None
                 is_running = False
-                message = "隧道已安全断开"
+                message = "cloudflared隧道已断开"
 
-    return render_template_string(
-        HTML_TEMPLATE, 
-        current_token=current_token, 
-        message=message, 
-        msg_class=msg_class, 
-        is_running=is_running
-    )
+    return render_template_string(HTML_TEMPLATE, current_token=current_token, message=message, is_running=is_running)
 
 if __name__ == '__main__':
     saved = load_saved_token()
