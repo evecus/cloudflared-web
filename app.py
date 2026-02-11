@@ -56,7 +56,7 @@ HTML_TEMPLATE = """
                     <button type="submit" name="action" value="save" class="save"><i class="fa-solid fa-floppy-disk"></i> 保存配置</button>
                     <button type="submit" name="action" value="start" class="run"><i class="fa-solid fa-play"></i> 启动隧道</button>
                 {% else %}
-                    <button type="submit" name="action" value="stop" class="stop"><i class="fa-solid fa-stop"></i> 停止并解锁</button>
+                    <button type="submit" name="action" value="stop" class="stop"><i class="fa-solid fa-stop"></i> 停止隧道</button>
                 {% endif %}
             </div>
         </form>
