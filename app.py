@@ -7,7 +7,7 @@ import re
 app = Flask(__name__)
 tunnel_process = None
 
-# 路径配置
+# --- 路径与环境配置 ---
 DATA_DIR = "/app/data"
 if not os.path.exists(DATA_DIR):
     os.makedirs(DATA_DIR)
@@ -15,9 +15,10 @@ if not os.path.exists(DATA_DIR):
 TOKEN_PATH = os.path.join(DATA_DIR, "token")
 LOG_FILE = os.path.join(DATA_DIR, "tunnel.log")
 
-# 环境变量检测
+# 环境变量检测 (支持 'token' 或 'TOKEN')
 ENV_TOKEN_VAL = os.getenv('token') or os.getenv('TOKEN')
 
+# --- 界面设计 ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -27,124 +28,88 @@ HTML_TEMPLATE = """
     <title>Cloudflared Pro Manager</title>
     <link rel="icon" href="https://www.cloudflare.com/favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
     <style>
         :root { 
             --cf-orange: #F38020; 
-            --glass: rgba(255, 255, 255, 0.85);
-            --grad-start: #6366f1;
-            --grad-end: #a855f7;
+            --primary: #6366f1;
+            --accent: #a855f7;
             --success: #10B981;
             --danger: #EF4444;
+            --font-mono: 'JetBrains Mono', monospace;
         }
 
         body { 
-            font-family: 'PingFang SC', system-ui, -apple-system, sans-serif; 
-            /* 绚丽的多色渐变背景 */
-            background: linear-gradient(45deg, #e0e7ff, #f3e8ff, #dcfce7);
-            background-size: 400% 400%;
-            animation: gradientBG 15s ease infinite;
+            font-family: 'PingFang SC', system-ui, sans-serif; 
+            background: linear-gradient(135deg, #f5f7ff 0%, #f0f4ff 100%);
             margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh;
-        }
-
-        @keyframes gradientBG {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
+            color: #1e293b;
         }
 
         .container { 
-            background: var(--glass); 
+            background: rgba(255, 255, 255, 0.95); 
             backdrop-filter: blur(20px);
-            border-radius: 30px; padding: 45px; width: 90%; max-width: 440px; 
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.1);
-            text-align: center;
-            border: 1px solid rgba(255, 255, 255, 0.4);
-            position: relative;
-            overflow: hidden;
+            border-radius: 32px; padding: 40px; width: 92%; max-width: 440px; 
+            box-shadow: 0 25px 50px -12px rgba(99, 102, 241, 0.15);
+            text-align: center; border: 1px solid rgba(255, 255, 255, 0.8);
         }
 
-        /* 顶部装饰条 */
-        .container::before {
-            content: ""; position: absolute; top: 0; left: 0; right: 0; height: 6px;
-            background: linear-gradient(to right, var(--cf-orange), #ffedd5);
-        }
-
-        .cf-logo { 
-            font-size: 60px; color: var(--cf-orange); margin-bottom: 15px;
-            filter: drop-shadow(0 5px 15px rgba(243, 128, 32, 0.3));
-        }
-
-        h2 { margin: 0; color: #1e293b; font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+        .cf-logo { font-size: 56px; color: var(--cf-orange); margin-bottom: 10px; filter: drop-shadow(0 4px 10px rgba(243, 128, 32, 0.2)); }
+        h2 { margin: 0; font-size: 24px; font-weight: 800; color: #1e293b; }
         
-        .sub-desc { 
-            display: inline-block; padding: 6px 16px; border-radius: 50px;
-            background: rgba(255,255,255,0.5); color: #64748b; font-size: 13px; margin: 15px 0 30px;
-            border: 1px solid rgba(0,0,0,0.05);
+        .mode-badge { 
+            display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 50px;
+            font-size: 12px; font-weight: 700; margin: 15px 0 25px;
         }
-        
+        .mode-env { background: #e0e7ff; color: #4338ca; }
+        .mode-local { background: #f1f5f9; color: #475569; }
+
+        /* 3. Token 输入与展示区域美化 */
         textarea { 
-            width: 100%; padding: 18px; border-radius: 20px; border: 2px solid rgba(99, 102, 241, 0.1); 
-            outline: none; box-sizing: border-box; font-family: 'Fira Code', monospace; 
-            background: rgba(255,255,255,0.6); resize: none; color: #334155; font-size: 13px;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            width: 100%; padding: 18px; border-radius: 20px; border: 2px solid #e2e8f0; 
+            outline: none; box-sizing: border-box; font-family: var(--font-mono); 
+            background: #f8fafc; resize: none; color: #334155; font-size: 13px; transition: 0.3s;
+        }
+        textarea:focus { border-color: var(--primary); background: #fff; box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1); }
+        textarea:disabled { background: #f1f5f9; color: #94a3b8; cursor: not-allowed; }
+
+        .env-display-card {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            border-radius: 20px; padding: 20px; color: white; text-align: left;
+            margin-bottom: 25px; box-shadow: 0 10px 20px rgba(99, 102, 241, 0.2);
+        }
+        .env-label { font-size: 11px; opacity: 0.8; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+        .env-value { 
+            font-family: var(--font-mono); font-size: 13px; margin-top: 10px; 
+            word-break: break-all; background: rgba(0,0,0,0.15); padding: 12px; border-radius: 12px;
+            line-height: 1.5; color: #e0e7ff;
         }
 
-        textarea:focus { 
-            border-color: var(--grad-start); background: #fff;
-            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15);
-        }
-
-        textarea:disabled { background: rgba(0,0,0,0.03); color: #94a3b8; cursor: not-allowed; border-color: transparent; }
-        
-        .btn-group { display: flex; gap: 15px; margin-top: 25px; }
-        
+        .btn-group { display: flex; gap: 12px; margin-top: 10px; }
         button { 
             flex: 1; padding: 14px; border-radius: 16px; border: none; cursor: pointer; 
             font-weight: 700; font-size: 15px; transition: all 0.3s;
             display: flex; align-items: center; justify-content: center; gap: 8px;
         }
         
-        .btn-save { 
-            background: #fff; color: #4f46e5; border: 2px solid #e0e7ff;
-        }
-        .btn-save:hover { background: #f5f3ff; border-color: #c7d2fe; transform: translateY(-2px); }
+        .btn-save { background: #fff; color: var(--primary); border: 2px solid #eef2ff; }
+        .btn-save:hover { background: #f5f7ff; transform: translateY(-2px); }
 
-        .btn-run { 
-            background: linear-gradient(135deg, var(--cf-orange), #fb923c); 
-            color: white; box-shadow: 0 10px 20px -5px rgba(243, 128, 32, 0.4);
-        }
-        .btn-run:hover { transform: translateY(-3px) scale(1.02); box-shadow: 0 15px 25px -5px rgba(243, 128, 32, 0.5); }
+        .btn-run { background: var(--cf-orange); color: white; box-shadow: 0 8px 16px rgba(243, 128, 32, 0.25); }
+        .btn-run:hover { transform: translateY(-2px); box-shadow: 0 12px 20px rgba(243, 128, 32, 0.35); }
 
-        .btn-stop { 
-            background: linear-gradient(135deg, #f43f5e, #e11d48); 
-            color: white; box-shadow: 0 10px 20px -5px rgba(244, 63, 94, 0.3);
-        }
-        .btn-stop:hover { transform: translateY(-2px); filter: brightness(1.1); }
+        .btn-stop { background: #fee2e2; color: var(--danger); width: 100%; flex: none; }
+        .btn-stop:hover { background: #fecaca; transform: translateY(-2px); }
         
         .status-msg { 
-            margin-top: 30px; padding: 18px; border-radius: 18px; font-size: 14px; 
-            display: flex; align-items: center; justify-content: center; gap: 10px; font-weight: 700;
-            animation: slideUp 0.4s ease-out;
+            margin-top: 25px; padding: 16px; border-radius: 16px; font-size: 13px; 
+            display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 700;
         }
-
-        @keyframes slideUp { from { opacity:0; transform: translateY(10px); } to { opacity:1; transform: translateY(0); } }
-
-        .s-success { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
-        .s-fail { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
-        
-        .dot { 
-            width: 10px; height: 10px; background: currentColor; border-radius: 50%; 
-            position: relative;
-        }
-        .dot::after {
-            content: ""; position: absolute; width: 100%; height: 100%;
-            background: inherit; border-radius: 50%; animation: pulse 1.5s infinite;
-        }
-
-        @keyframes pulse {
-            0% { transform: scale(1); opacity: 0.8; }
-            100% { transform: scale(3); opacity: 0; }
-        }
+        .s-success { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+        .s-fail { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+        .dot { width: 8px; height: 8px; background: currentColor; border-radius: 50%; animation: blink 1s infinite; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
     </style>
 </head>
 <body>
@@ -152,31 +117,34 @@ HTML_TEMPLATE = """
         <div class="cf-logo"><i class="fa-brands fa-cloudflare"></i></div>
         <h2>隧道管理面板</h2>
         
-        <div class="sub-desc">
+        <div class="mode-badge {{ 'mode-env' if env_active else 'mode-local' }}">
             {% if env_active %}
-                <i class="fa-solid fa-bolt" style="color: #eab308"></i> 环境变量模式
+                <i class="fa-solid fa-bolt-lightning"></i> 环境变量模式已启用
             {% else %}
-                <i class="fa-solid fa-folder-open" style="color: #6366f1"></i> 本地持久化模式
+                <i class="fa-solid fa-database"></i> 本地保存模式已启用
             {% endif %}
         </div>
         
         <form method="post">
-            <textarea name="raw_input" rows="4" placeholder="在此输入 Token 或 Docker 运行命令..." {{ 'disabled' if is_running }}>{{ current_token }}</textarea>
+            {% if env_active %}
+                <div class="env-display-card">
+                    <div class="env-label">当前运行 Token</div>
+                    <div class="env-value">{{ current_token }}</div>
+                </div>
+            {% else %}
+                <div class="input-box" style="margin-bottom: 20px;">
+                    <textarea name="raw_input" rows="5" placeholder="粘贴 Token 或 Docker 命令..." {{ 'disabled' if is_running }}>{{ current_token }}</textarea>
+                </div>
+            {% endif %}
             
             <div class="btn-group">
                 {% if not is_running %}
                     {% if not env_active %}
-                    <button type="submit" name="action" value="save" class="btn-save">
-                        <i class="fa-solid fa-cloud-arrow-up"></i> 保存配置
-                    </button>
+                    <button type="submit" name="action" value="save" class="btn-save"><i class="fa-solid fa-floppy-disk"></i> 保存配置</button>
                     {% endif %}
-                    <button type="submit" name="action" value="start" class="btn-run" style="{{ 'width:100%; flex:none;' if env_active }}">
-                        <i class="fa-solid fa-rocket"></i> 启动隧道
-                    </button>
+                    <button type="submit" name="action" value="start" class="btn-run" style="{{ 'width:100%; flex:none;' if env_active }}"><i class="fa-solid fa-play"></i> 启动隧道</button>
                 {% else %}
-                    <button type="submit" name="action" value="stop" class="btn-stop" style="width:100%; flex:none;">
-                        <i class="fa-solid fa-power-off"></i> 断开隧道连接
-                    </button>
+                    <button type="submit" name="action" value="stop" class="btn-stop"><i class="fa-solid fa-stop"></i> 断开隧道连接</button>
                 {% endif %}
             </div>
         </form>
@@ -192,8 +160,9 @@ HTML_TEMPLATE = """
 </html>
 """
 
-# 后端逻辑保持你发送的代码逻辑不变，仅更新 check_status 匹配项
+# --- 后端逻辑 ---
 def extract_token(text):
+    if not text: return ""
     cleaned = re.sub(r'[\\\n\r\t\s]', '', text)
     match = re.search(r'[eE]yJh[a-zA-Z0-9\-_]{50,}', cleaned)
     return match.group(0) if match else cleaned
@@ -210,6 +179,7 @@ def check_status():
     if not os.path.exists(LOG_FILE): return False
     with open(LOG_FILE, "r") as f:
         content = f.read()
+        # 兼容最新日志格式
         if any(x in content for x in ["Connected", "Registered", "Updated to new configuration"]):
             return True
     return False
@@ -232,10 +202,10 @@ def index():
                 current_token = token
                 message = "配置保存成功"
             else:
-                message = "未检测到有效Token"
+                message = "未发现有效 Token"
 
         elif action == 'start' and not is_running:
-            token_to_run = extract_token(raw_input) if raw_input else current_token
+            token_to_run = extract_token(raw_input) if (raw_input and not ENV_TOKEN_VAL) else current_token
             if token_to_run:
                 with open(LOG_FILE, "w") as f: f.write("") 
                 tunnel_process = subprocess.Popen(
@@ -244,11 +214,11 @@ def index():
                 )
                 time.sleep(5) 
                 if check_status():
-                    message, is_running = "隧道已连接成功", True
+                    message, is_running = "cloudflared隧道连接成功", True
                 else:
-                    message = "连接失败，请检查Token"
+                    message = "连接超时，请检查Token或网络"
             else:
-                message = "缺少Token内容"
+                message = "启动失败：缺少 Token"
 
         elif action == 'stop':
             if tunnel_process:
@@ -256,7 +226,7 @@ def index():
                 tunnel_process.wait()
                 tunnel_process = None
                 is_running = False
-                message = "隧道已断开"
+                message = "隧道已安全断开"
 
     return render_template_string(
         HTML_TEMPLATE, 
@@ -267,6 +237,7 @@ def index():
     )
 
 if __name__ == '__main__':
+    # 启动时自动检查是否有 Token 并尝试运行
     t = get_current_token()
     if t:
         tunnel_process = subprocess.Popen(
