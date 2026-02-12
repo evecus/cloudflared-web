@@ -144,7 +144,7 @@ HTML_TEMPLATE = """
                     {% endif %}
                     <button type="submit" name="action" value="start" class="btn-run" style="{{ 'width:100%; flex:none;' if env_active }}"><i class="fa-solid fa-play"></i> 启动隧道</button>
                 {% else %}
-                    <button type="submit" name="action" value="stop" class="btn-stop"><i class="fa-solid fa-stop"></i> 断开隧道连接</button>
+                    <button type="submit" name="action" value="stop" class="btn-stop"><i class="fa-solid fa-stop"></i> 断开连接</button>
                 {% endif %}
             </div>
         </form>
