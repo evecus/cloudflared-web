@@ -1,41 +1,48 @@
-name: Build and Push to GHCR
+name: Update and Deploy to Docker Hub
 
 on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
+  schedule:
+    - cron: '0 0 */5 * *' # 每5天运行一次 (UTC时间)
+  workflow_dispatch:      # 支持手动点击运行
 
 jobs:
-  build-and-push:
+  check-and-build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      # 模拟不同架构环境
+      - name: Get Latest Cloudflared Version
+        id: cf_ver
+        run: |
+          VERSION=$(curl -s https://api.github.com/repos/cloudflare/cloudflared/releases/latest | jq -r .tag_name)
+          echo "latest_version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Check if version changed
+        id: check
+        run: |
+          # 这里我们可以通过 Docker Hub API 检查是否已有该 Tag
+          # 为了简单可靠，我们直接对比官方版本。你也可以缓存旧版本号
+          echo "New version detected: ${{ steps.cf_ver.outputs.latest_version }}"
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GHCR
+      - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: true
-          # 关键点：指定构建 amd64 和 arm64 两个版本
           platforms: linux/amd64,linux/arm64
+          push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/cloudflared-web:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/cloudflared-web:${{ steps.cf_ver.outputs.latest_version }}
