@@ -25,20 +25,22 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cloudflared Manager</title>
+    <link rel="icon" href="https://www.cloudflare.com/favicon.ico" type="image/x-icon">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         :root { --cf-orange: #F38020; --success: #10B981; --danger: #EF4444; }
         body { 
             font-family: 'PingFang SC', system-ui, sans-serif; 
-            /* 清新渐变背景 */
-            background: linear-gradient(135deg, #e0f2fe 0%, #f0fdf4 100%);
+            /* 清新浅色调渐变背景 */
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 50%, #f0fdf4 100%);
             margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh;
         }
         .container { 
             background: rgba(255, 255, 255, 0.9); 
             backdrop-filter: blur(10px);
             border-radius: 24px; padding: 40px; width: 90%; max-width: 420px; 
-            box-shadow: 0 15px 35px rgba(0,0,0,0.05); text-align: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.03); text-align: center;
+            border: 1px solid rgba(255,255,255,0.6);
         }
         .cf-logo { font-size: 50px; color: var(--cf-orange); margin-bottom: 15px; }
         h2 { margin: 0; color: #334155; font-size: 22px; }
@@ -55,8 +57,11 @@ HTML_TEMPLATE = """
         button { flex: 1; padding: 12px; border-radius: 12px; border: none; cursor: pointer; font-weight: 700; transition: 0.3s; }
         
         .btn-save { background: #fff; color: #475569; border: 1px solid #e2e8f0; }
+        .btn-save:hover { background: #f8fafc; border-color: #cbd5e1; }
         .btn-run { background: var(--cf-orange); color: white; }
+        .btn-run:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(243, 128, 32, 0.3); }
         .btn-stop { background: #fee2e2; color: var(--danger); }
+        .btn-stop:hover { background: #fecaca; }
         
         .status-msg { margin-top: 25px; padding: 15px; border-radius: 12px; font-size: 14px; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 600; }
         .s-success { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
@@ -70,7 +75,7 @@ HTML_TEMPLATE = """
         <div class="cf-logo"><i class="fa-brands fa-cloudflare"></i></div>
         <h2>隧道管理面板</h2>
         <p class="sub-desc">
-            {% if env_active %} <i class="fa-solid fa-shield-halved"></i> 环境变量模式已启用 {% else %} 数据持久化目录: /app/data {% endif %}
+            {% if env_active %} <i class="fa-solid fa-shield-halved"></i> 环境变量模式已启用 {% else %} 本地保存模式已启用 {% endif %}
         </p>
         
         <form method="post">
@@ -105,7 +110,6 @@ def extract_token(text):
     return match.group(0) if match else cleaned
 
 def get_current_token():
-    # 逻辑：优先读环境变量，其次读文件
     if ENV_TOKEN_VAL:
         return extract_token(ENV_TOKEN_VAL)
     if os.path.exists(TOKEN_PATH):
@@ -114,11 +118,10 @@ def get_current_token():
     return ""
 
 def check_status():
-    """改进的检测逻辑"""
     if not os.path.exists(LOG_FILE): return False
     with open(LOG_FILE, "r") as f:
         content = f.read()
-        # 匹配任何成功的标志
+        # 兼容最新日志格式
         if any(x in content for x in ["Connected", "Registered", "Updated to new configuration"]):
             return True
     return False
@@ -139,25 +142,25 @@ def index():
             if token:
                 with open(TOKEN_PATH, "w") as f: f.write(token)
                 current_token = token
-                message = "配置已保存至本地文件"
+                message = "配置已保存成功"
             else:
-                message = "保存失败：无效内容"
+                message = "保存失败：未发现有效Token"
 
         elif action == 'start' and not is_running:
             token_to_run = extract_token(raw_input) if raw_input else current_token
             if token_to_run:
-                with open(LOG_FILE, "w") as f: f.write("") # 清空日志
+                with open(LOG_FILE, "w") as f: f.write("") 
                 tunnel_process = subprocess.Popen(
                     ['cloudflared', 'tunnel', '--no-autoupdate', 'run', '--token', token_to_run],
                     stdout=open(LOG_FILE, "a"), stderr=subprocess.STDOUT, text=True
                 )
-                time.sleep(5) # 稍微多等一会儿让 4 个连接跑完
+                time.sleep(5) 
                 if check_status():
                     message, is_running = "cloudflared隧道连接成功", True
                 else:
-                    message = "连接超时或失败，请查看后台日志"
+                    message = "连接超时，请检查Token或网络"
             else:
-                message = "错误：没有检测到Token"
+                message = "启动失败：缺少Token"
 
         elif action == 'stop':
             if tunnel_process:
@@ -165,7 +168,7 @@ def index():
                 tunnel_process.wait()
                 tunnel_process = None
                 is_running = False
-                message = "隧道已断开"
+                message = "隧道已安全断开"
 
     return render_template_string(
         HTML_TEMPLATE, 
@@ -176,7 +179,6 @@ def index():
     )
 
 if __name__ == '__main__':
-    # 启动时自连
     t = get_current_token()
     if t:
         tunnel_process = subprocess.Popen(
