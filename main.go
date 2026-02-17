@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"html/template"
 	"io/ioutil"
@@ -10,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 var (
@@ -35,12 +37,47 @@ func getStoredToken() string {
 	return strings.TrimSpace(string(data))
 }
 
+// 严谨的连接检测逻辑
+func startTunnelWithCheck(token string) bool {
+	cmd := exec.Command("cloudflared", "tunnel", "--no-autoupdate", "run", "--token", token)
+	stderr, _ := cmd.StderrPipe()
+	if err := cmd.Start(); err != nil {
+		return false
+	}
+
+	success := make(chan bool)
+	// 使用协程实时扫描日志流
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			// 增加 Registered 和 Updated 关键词，匹配你提供的最新日志 
+			if strings.Contains(line, "Connected") || 
+			   strings.Contains(line, "Registered") || 
+			   strings.Contains(line, "Updated to new configuration") {
+				success <- true
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-success:
+		mu.Lock()
+		tunnelCmd = cmd
+		mu.Unlock()
+		return true
+	case <-time.After(15 * time.Second): // 15秒内未见成功标识则判定失败
+		_ = cmd.Process.Kill()
+		return false
+	}
+}
+
 func indexHandler(w http.ResponseWriter, r *http.Request) {
 	mu.Lock()
 	isRunning := tunnelCmd != nil && tunnelCmd.Process != nil && tunnelCmd.ProcessState == nil
 	mu.Unlock()
 
-	// 核心逻辑判断
 	isModifying := r.URL.Query().Get("edit") == "true"
 	currentToken := getStoredToken()
 	hasToken := currentToken != ""
@@ -52,42 +89,33 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 		action := r.FormValue("action")
 		rawInput := r.FormValue("raw_input")
 
-		switch action {
-		case "save":
+		if action == "save" {
 			token := extractToken(rawInput)
 			if token != "" {
 				_ = os.MkdirAll(dataDir, 0755)
-				err := ioutil.WriteFile(tokenPath, []byte(token), 0644)
-				if err == nil {
-					// 保存成功后，重定向到不带 edit=true 的页面，回到界面二
+				if err := ioutil.WriteFile(tokenPath, []byte(token), 0644); err == nil {
+					// 保存成功，重定向回界面二（hasToken变为true，且无edit参数）
 					http.Redirect(w, r, "/?msg=配置保存成功&type=success", http.StatusSeeOther)
 					return
 				}
 				message, msgType = "配置保存失败", "error"
+			}
+		} else if action == "start" && !isRunning {
+			if startTunnelWithCheck(currentToken) {
+				http.Redirect(w, r, "/", http.StatusSeeOther)
+				return
 			} else {
-				message, msgType = "未检测到有效Token", "error"
+				// 连接失败，保持在界面二，显示错误
+				http.Redirect(w, r, "/?msg=连接失败，请检查配置或网络&type=error", http.StatusSeeOther)
+				return
 			}
-		case "start":
-			if hasToken && !isRunning {
-				c := exec.Command("cloudflared", "tunnel", "--no-autoupdate", "run", "--token", currentToken)
-				if err := c.Start(); err == nil {
-					mu.Lock()
-					tunnelCmd = c
-					mu.Unlock()
-					isRunning = true
-				}
-			}
-			http.Redirect(w, r, "/", http.StatusSeeOther)
-			return
-		case "stop":
+		} else if action == "stop" {
 			mu.Lock()
-			if tunnelCmd != nil && tunnelCmd.Process != nil {
+			if tunnelCmd != nil {
 				_ = tunnelCmd.Process.Kill()
-				_ = tunnelCmd.Wait()
 				tunnelCmd = nil
 			}
 			mu.Unlock()
-			isRunning = false
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -103,51 +131,44 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
         :root { --accent: #f38020; --primary-grad: linear-gradient(135deg, #f38020 0%, #faad14 100%); }
         body { 
             margin: 0; min-height: 100vh; display: flex; justify-content: center; align-items: center;
-            background: radial-gradient(circle at 15% 15%, #e0e7ff, transparent 45%), radial-gradient(circle at 85% 85%, #ffedd5, transparent 45%), #f8fafc;
-            font-family: -apple-system, "PingFang SC", sans-serif;
+            background: #f8fafc; font-family: -apple-system, "PingFang SC", sans-serif;
         }
         .card { 
-            width: 90%; max-width: 420px; padding: 45px 30px; background: rgba(255,255,255,0.85);
-            backdrop-filter: blur(25px); border-radius: 35px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.1); border: 1px solid #fff; text-align: center;
+            width: 90%; max-width: 420px; padding: 40px; background: white;
+            border-radius: 30px; box-shadow: 0 20px 50px rgba(0,0,0,0.05); text-align: center;
         }
-        .status-pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 22px; border-radius: 50px; font-size: 13px; font-weight: 800; margin-bottom: 30px; }
-        .on { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
-        .off { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
+        .status-pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 18px; border-radius: 50px; font-size: 12px; font-weight: 800; margin-bottom: 30px; }
+        .on { background: #dcfce7; color: #15803d; }
+        .off { background: #f1f5f9; color: #64748b; }
         .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
         .on .dot { animation: blink 1s infinite; }
         @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-        .token-view { background: rgba(248,250,252,0.9); border: 1px solid #e2e8f0; border-radius: 20px; padding: 20px; font-family: monospace; font-size: 13px; word-break: break-all; color: #475569; text-align: left; margin-bottom: 25px; line-height: 1.6; }
-        textarea { width: 100%; border: 2px solid #e2e8f0; border-radius: 20px; padding: 20px; box-sizing: border-box; font-size: 14px; background: #fff; resize: none; margin-bottom: 25px; transition: 0.3s; }
-        textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px rgba(243,128,32,0.1); }
+        .token-view { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 18px; padding: 20px; font-family: monospace; font-size: 13px; word-break: break-all; color: #475569; text-align: left; margin-bottom: 25px; line-height: 1.5; }
+        textarea { width: 100%; border: 2px solid #e2e8f0; border-radius: 18px; padding: 20px; box-sizing: border-box; font-size: 14px; background: #fff; resize: none; margin-bottom: 25px; transition: 0.3s; }
+        textarea:focus { outline: none; border-color: var(--accent); }
 
-        .btn-group { display: flex; gap: 15px; }
+        .btn-group { display: flex; gap: 12px; }
         button, .btn-link { 
-            flex: 1; height: 55px; border: none; border-radius: 18px; font-weight: 800; cursor: pointer; 
-            display: flex; align-items: center; justify-content: center; gap: 10px; transition: all 0.2s; font-size: 15px; text-decoration: none; box-sizing: border-box;
+            flex: 1; height: 55px; border: none; border-radius: 16px; font-weight: 800; cursor: pointer; 
+            display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s; font-size: 15px; text-decoration: none; box-sizing: border-box;
         }
-        /* 启动/保存：主色调 */
-        .btn-main { background: var(--primary-grad); color: white; box-shadow: 0 8px 15px rgba(243,128,32,0.2); }
-        /* 修改：次色调，大小与启动相同 */
-        .btn-edit { background: #eff6ff; color: #2563eb; border: 1.5px solid #dbeafe; }
-        .btn-stop { width: 100%; background: #fee2e2; color: #ef4444; border: 1.5px solid #fecaca; }
-        
-        button:hover, .btn-link:hover { transform: translateY(-2px); filter: brightness(1.05); }
+        .btn-main { background: var(--primary-grad); color: white; }
+        .btn-edit { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+        .btn-stop { width: 100%; background: #fee2e2; color: #ef4444; border: 1px solid #fecaca; }
         button:active { transform: scale(0.96); }
 
-        .msg { margin-top: 20px; font-size: 14px; font-weight: 700; padding: 12px; border-radius: 15px; animation: slideUp 0.3s; }
+        .msg { margin-top: 20px; font-size: 14px; font-weight: 700; padding: 12px; border-radius: 12px; }
         .msg-success { color: #15803d; background: #f0fdf4; border: 1px solid #bbf7d0; }
         .msg-error { color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
     <div class="card">
-        <div style="font-size: 55px; color: var(--accent);"><i class="fa-brands fa-cloudflare"></i></div>
-        <h2 style="margin: 10px 0 25px; font-weight: 900;">隧道管理中心</h2>
-
+        <div style="font-size: 50px; color: var(--accent); margin-bottom: 20px;"><i class="fa-brands fa-cloudflare"></i></div>
+        
         <div class="status-pill {{if .IsRunning}}on{{else}}off{{end}}">
-            <div class="dot"></div> {{if .IsRunning}}TUNNEL ACTIVE{{else}}TUNNEL OFFLINE{{end}}
+            <div class="dot"></div> {{if .IsRunning}}隧道运行中{{else}}隧道待命中{{end}}
         </div>
 
         <form method="post">
@@ -155,7 +176,7 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
                 <div class="token-view">{{.Token}}</div>
                 <button type="submit" name="action" value="stop" class="btn-stop"><i class="fa-solid fa-power-off"></i> 断开连接</button>
             {{else if or (not .HasToken) .IsModifying}}
-                <textarea name="raw_input" rows="4" placeholder="粘贴 Token 或 Docker 命令...">{{if .IsModifying}}{{.Token}}{{end}}</textarea>
+                <textarea name="raw_input" rows="4" placeholder="在此粘贴 Token...">{{if .IsModifying}}{{.Token}}{{end}}</textarea>
                 <button type="submit" name="action" value="save" class="btn-main" style="width:100%"><i class="fa-solid fa-floppy-disk"></i> 保存配置</button>
             {{else}}
                 <div class="token-view">{{.Token}}</div>
@@ -185,6 +206,5 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	_ = os.MkdirAll(dataDir, 0755)
 	http.HandleFunc("/", indexHandler)
-	fmt.Println("Tunnel Manager running on :12222")
 	http.ListenAndServe(":12222", nil)
 }
