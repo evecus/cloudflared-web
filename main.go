@@ -36,7 +36,6 @@ func getStoredToken() string {
 	return strings.TrimSpace(string(data))
 }
 
-// 高频日志检测逻辑
 func startTunnelWithCheck(token string) bool {
 	cmd := exec.Command("cloudflared", "tunnel", "--no-autoupdate", "run", "--token", token)
 	stderr, _ := cmd.StderrPipe()
@@ -49,7 +48,7 @@ func startTunnelWithCheck(token string) bool {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()
-			// 匹配你日志中出现的任何成功迹象
+			// 涵盖所有连接成功标识，实现即时捕获
 			if strings.Contains(line, "Connected") || 
 			   strings.Contains(line, "Registered") || 
 			   strings.Contains(line, "Updated to new configuration") {
@@ -59,7 +58,6 @@ func startTunnelWithCheck(token string) bool {
 		}
 	}()
 
-	// 缩短超时时间到 7 秒，并支持即时捕获
 	select {
 	case <-success:
 		mu.Lock()
@@ -124,6 +122,9 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CF Tunnel Manager</title>
+    <link rel="icon" href="https://www.cloudflare.com/favicon.ico" type="image/x-icon">
+    <link rel="shortcut icon" href="https://www.cloudflare.com/favicon.ico" type="image/x-icon">
+    
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root { --accent: #f38020; --primary-grad: linear-gradient(135deg, #f38020 0%, #faad14 100%); --glass: rgba(255, 255, 255, 0.85); }
