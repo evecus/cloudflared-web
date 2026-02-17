@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"fmt"
 	"html/template"
 	"io/ioutil"
 	"net/http"
@@ -37,7 +36,7 @@ func getStoredToken() string {
 	return strings.TrimSpace(string(data))
 }
 
-// 严谨的连接检测逻辑
+// 严谨的连接检测：匹配 Registered 或 Updated
 func startTunnelWithCheck(token string) bool {
 	cmd := exec.Command("cloudflared", "tunnel", "--no-autoupdate", "run", "--token", token)
 	stderr, _ := cmd.StderrPipe()
@@ -46,12 +45,11 @@ func startTunnelWithCheck(token string) bool {
 	}
 
 	success := make(chan bool)
-	// 使用协程实时扫描日志流
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()
-			// 增加 Registered 和 Updated 关键词，匹配你提供的最新日志 
+			// 严谨匹配你日志中的 Registered 和 Updated 关键字
 			if strings.Contains(line, "Connected") || 
 			   strings.Contains(line, "Registered") || 
 			   strings.Contains(line, "Updated to new configuration") {
@@ -67,7 +65,7 @@ func startTunnelWithCheck(token string) bool {
 		tunnelCmd = cmd
 		mu.Unlock()
 		return true
-	case <-time.After(15 * time.Second): // 15秒内未见成功标识则判定失败
+	case <-time.After(15 * time.Second):
 		_ = cmd.Process.Kill()
 		return false
 	}
@@ -94,25 +92,24 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 			if token != "" {
 				_ = os.MkdirAll(dataDir, 0755)
 				if err := ioutil.WriteFile(tokenPath, []byte(token), 0644); err == nil {
-					// 保存成功，重定向回界面二（hasToken变为true，且无edit参数）
 					http.Redirect(w, r, "/?msg=配置保存成功&type=success", http.StatusSeeOther)
 					return
 				}
-				message, msgType = "配置保存失败", "error"
 			}
+			http.Redirect(w, r, "/?msg=配置保存失败&type=error", http.StatusSeeOther)
+			return
 		} else if action == "start" && !isRunning {
 			if startTunnelWithCheck(currentToken) {
 				http.Redirect(w, r, "/", http.StatusSeeOther)
-				return
 			} else {
-				// 连接失败，保持在界面二，显示错误
 				http.Redirect(w, r, "/?msg=连接失败，请检查配置或网络&type=error", http.StatusSeeOther)
-				return
 			}
+			return
 		} else if action == "stop" {
 			mu.Lock()
 			if tunnelCmd != nil {
 				_ = tunnelCmd.Process.Kill()
+				_ = tunnelCmd.Wait()
 				tunnelCmd = nil
 			}
 			mu.Unlock()
@@ -131,7 +128,7 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
         :root { --accent: #f38020; --primary-grad: linear-gradient(135deg, #f38020 0%, #faad14 100%); }
         body { 
             margin: 0; min-height: 100vh; display: flex; justify-content: center; align-items: center;
-            background: #f8fafc; font-family: -apple-system, "PingFang SC", sans-serif;
+            background: #f8fafc; font-family: -apple-system, sans-serif;
         }
         .card { 
             width: 90%; max-width: 420px; padding: 40px; background: white;
@@ -168,7 +165,7 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
         <div style="font-size: 50px; color: var(--accent); margin-bottom: 20px;"><i class="fa-brands fa-cloudflare"></i></div>
         
         <div class="status-pill {{if .IsRunning}}on{{else}}off{{end}}">
-            <div class="dot"></div> {{if .IsRunning}}隧道运行中{{else}}隧道待命中{{end}}
+            <div class="dot"></div> {{if .IsRunning}}隧道已连接边缘网络{{else}}等待建立安全隧道{{end}}
         </div>
 
         <form method="post">
