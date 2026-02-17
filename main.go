@@ -63,6 +63,8 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 				_ = ioutil.WriteFile(tokenPath, []byte(tokenToRun), 0644)
 			}
 			if tokenToRun != "" {
+				// 启动前先清空旧日志
+				_ = ioutil.WriteFile(logPath, []byte(""), 0644)
 				c := exec.Command("cloudflared", "tunnel", "--no-autoupdate", "run", "--token", tokenToRun)
 				f, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 				c.Stdout = f
@@ -71,6 +73,7 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 					mu.Lock()
 					tunnelCmd = c
 					mu.Unlock()
+					isRunning = true
 				}
 			}
 		} else if action == "stop" && isRunning {
@@ -81,6 +84,7 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 				tunnelCmd = nil
 			}
 			mu.Unlock()
+			isRunning = false
 		}
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
@@ -89,121 +93,78 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 	const html = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cloudflared 控制台</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        :root {
-            --accent: #f38020;
-            --accent-grad: linear-gradient(135deg, #f38020 0%, #faad14 100%);
-            --bg: #f4f7fb;
-            --card-bg: rgba(255, 255, 255, 0.9);
-            --text-main: #1e293b;
+        :root { --accent: #f38020; --bg: #f4f7fb; }
+        body { 
+            margin: 0; min-height: 100vh; display: flex; justify-content: center; align-items: center;
+            background: radial-gradient(circle at top left, #e0e7ff, transparent 40%), radial-gradient(circle at bottom right, #ffedd5, transparent 40%);
+            background-color: var(--bg); font-family: -apple-system, sans-serif; 
         }
-        body {
-            margin: 0; min-height: 100vh;
-            display: flex; justify-content: center; align-items: center;
-            background: radial-gradient(circle at 0% 0%, #e0e7ff 0%, transparent 40%),
-                        radial-gradient(circle at 100% 100%, #ffedd5 0%, transparent 40%);
-            background-color: var(--bg);
-            font-family: -apple-system, "PingFang SC", sans-serif;
-            color: var(--text-main);
+        .container { 
+            width: 90%; max-width: 400px; background: rgba(255,255,255,0.9); backdrop-filter: blur(20px);
+            border-radius: 32px; padding: 40px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.1); border: 1px solid #fff; text-align: center;
         }
-        .container {
-            width: 90%; max-width: 420px;
-            background: var(--card-bg);
-            backdrop-filter: blur(20px);
-            border-radius: 30px;
-            padding: 40px;
-            box-shadow: 0 20px 50px rgba(0,0,0,0.05);
-            border: 1px solid rgba(255,255,255,0.6);
-            text-align: center;
+        .status-pill { 
+            display: inline-flex; align-items: center; gap: 8px; padding: 8px 20px; border-radius: 50px;
+            font-size: 13px; font-weight: 800; margin: 20px 0 30px; transition: 0.3s;
         }
-        .logo-area { font-size: 50px; color: var(--accent); margin-bottom: 10px; }
-        h1 { font-size: 22px; margin: 0; font-weight: 800; letter-spacing: -0.5px; }
-        .subtitle { font-size: 13px; color: #64748b; margin-bottom: 25px; }
-
-        .status-pill {
-            display: inline-flex; align-items: center; gap: 8px;
-            padding: 8px 20px; border-radius: 50px;
-            font-size: 13px; font-weight: 700; margin-bottom: 30px;
-            transition: 0.3s;
-        }
-        .status-pill.on { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
-        .status-pill.off { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
+        .on { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+        .off { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
         .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-        .on .dot { animation: blink 1.2s infinite; }
-        @keyframes blink { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.8); } }
-
-        .token-card {
-            background: #f8fafc; border: 1px solid #e2e8f0;
-            border-radius: 16px; padding: 15px; margin-bottom: 20px;
-            text-align: left; position: relative;
-        }
-        .token-label { font-size: 11px; font-weight: 800; color: #94a3b8; text-transform: uppercase; margin-bottom: 8px; }
-        .token-value { font-family: "JetBrains Mono", monospace; font-size: 12px; word-break: break-all; color: #334155; line-height: 1.5; }
+        .on .dot { animation: blink 1s infinite; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
         
-        textarea {
-            width: 100%; border: 2px solid #e2e8f0; border-radius: 16px;
-            padding: 15px; box-sizing: border-box; font-size: 13px;
-            font-family: inherit; margin-bottom: 20px; transition: 0.3s;
-            background: rgba(255,255,255,0.5); resize: none;
+        .token-area { text-align: left; margin-bottom: 25px; }
+        .label { font-size: 11px; font-weight: 800; color: #94a3b8; text-transform: uppercase; margin-bottom: 8px; padding-left: 5px; }
+        .token-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px; padding: 15px; font-family: monospace; font-size: 12px; word-break: break-all; color: #475569; }
+        textarea { width: 100%; border: 2px solid #e2e8f0; border-radius: 16px; padding: 15px; box-sizing: border-box; font-size: 13px; background: #fff; resize: none; margin-top: 5px; }
+        
+        button { 
+            width: 100%; border: none; border-radius: 18px; padding: 15px; font-weight: 700; cursor: pointer; 
+            display: flex; align-items: center; justify-content: center; gap: 10px; transition: 0.2s;
         }
-        textarea:focus { outline: none; border-color: var(--accent); background: #fff; }
-
-        .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-        button {
-            border: none; border-radius: 16px; padding: 14px;
-            font-weight: 700; font-size: 14px; cursor: pointer;
-            display: flex; align-items: center; justify-content: center; gap: 8px;
-            transition: all 0.2s;
-        }
-        button:active { transform: scale(0.96); }
-        .btn-run { background: var(--accent-grad); color: white; box-shadow: 0 10px 20px rgba(243, 128, 32, 0.2); grid-column: span {{if .HasEnv}}2{{else}}1{{end}}; }
-        .btn-save { background: white; color: #475569; border: 1px solid #e2e8f0; }
-        .btn-stop { background: #fee2e2; color: #ef4444; grid-column: span 2; }
+        .btn-start { background: linear-gradient(135deg, #f38020, #faad14); color: white; box-shadow: 0 10px 20px rgba(243,128,32,0.2); }
+        .btn-stop { background: #fee2e2; color: #ef4444; }
+        .btn-save { background: #fff; color: #64748b; border: 1px solid #e2e8f0; margin-bottom: 10px; }
+        button:active { transform: scale(0.97); }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="logo-area"><i class="fa-brands fa-cloudflare"></i></div>
-        <h1>隧道管理仪表盘</h1>
-        <div class="subtitle">Cloudflared 边缘网络连接控制器</div>
-
+        <div style="font-size: 50px; color: var(--accent);"><i class="fa-brands fa-cloudflare"></i></div>
+        <h2 style="margin: 10px 0 5px;">Cloudflared</h2>
+        
         <div class="status-pill {{if .IsRunning}}on{{else}}off{{end}}">
             <div class="dot"></div>
-            {{if .IsRunning}}TUNNEL ACTIVE{{else}}TUNNEL OFFLINE{{end}}
+            {{if .IsRunning}}隧道已连接边缘网络{{else}}服务处于离线状态{{end}}
         </div>
 
         <form method="post">
-            {{if .Token}}
-            <div class="token-card">
-                <div class="token-label">{{if .HasEnv}}Environment Token{{else}}Stored Token{{end}}</div>
-                <div class="token-value">{{.Token}}</div>
-            </div>
-            {{end}}
-
-            {{if not .HasEnv}}
-            <textarea name="raw_input" rows="3" placeholder="输入 Token 或 Docker run 命令..." {{if .IsRunning}}disabled{{end}}></textarea>
-            {{end}}
-
-            <div class="actions">
-                {{if .IsRunning}}
-                <button type="submit" name="action" value="stop" class="btn-stop">
-                    <i class="fa-solid fa-power-off"></i> 停止连接
-                </button>
-                {{else}}
+            {{if not .IsRunning}}
+                <div class="token-area">
+                    <div class="label">{{if .HasEnv}}Environment Token{{else}}Current Configuration{{end}}</div>
+                    {{if .Token}}<div class="token-box">{{.Token}}</div>{{end}}
+                    
                     {{if not .HasEnv}}
-                    <button type="submit" name="action" value="save" class="btn-save">
-                        <i class="fa-solid fa-bookmark"></i> 保存
-                    </button>
+                        <textarea name="raw_input" rows="3" placeholder="输入 Token 或 Docker run 命令..."></textarea>
                     {{end}}
-                    <button type="submit" name="action" value="start" class="btn-run">
-                        <i class="fa-solid fa-play"></i> 启动隧道
-                    </button>
+                </div>
+                
+                {{if not .HasEnv}}
+                    <button type="submit" name="action" value="save" class="btn-save"><i class="fa-solid fa-floppy-disk"></i> 保存本地配置</button>
                 {{end}}
-            </div>
+                <button type="submit" name="action" value="start" class="btn-start"><i class="fa-solid fa-bolt"></i> 启动隧道</button>
+            {{else}}
+                <div style="margin-bottom: 30px; color: #94a3b8; font-size: 13px;">
+                    <i class="fa-solid fa-shield-halved"></i> 隧道加密传输中，配置已锁定
+                </div>
+                <button type="submit" name="action" value="stop" class="btn-stop">
+                    <i class="fa-solid fa-power-off"></i> 断开隧道连接
+                </button>
+            {{end}}
         </form>
     </div>
 </body>
@@ -220,6 +181,6 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	_ = os.MkdirAll(dataDir, 0755)
 	http.HandleFunc("/", indexHandler)
-	fmt.Println("Manager running on :12222")
+	fmt.Println("Secure Manager running on :12222")
 	http.ListenAndServe(":12222", nil)
 }
