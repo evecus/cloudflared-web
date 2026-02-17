@@ -15,7 +15,7 @@ var (
 	cmd       *exec.Cmd
 	mu        sync.Mutex
 	logPath   = "/app/data/tunnel.log"
-	[span_3](start_span)envToken  = os.Getenv("token") // 兼容 app.py 的逻辑[span_3](end_span)
+	envToken  = os.Getenv("token") // 兼容 app.py 的逻辑 
 )
 
 func extractToken(input string) string {
@@ -104,7 +104,7 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	os.MkdirAll("/app/data", 0755)
 	if envToken == "" {
-		[span_4](start_span)envToken = os.Getenv("TOKEN") // 再次尝试大写版本[span_4](end_span)
+		envToken = os.Getenv("TOKEN") // 再次尝试大写版本 
 	}
 	http.HandleFunc("/", indexHandler)
 	fmt.Println("Lightweight Manager running on :12222")
