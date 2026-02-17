@@ -20,15 +20,19 @@ var (
 	logPath   = "/app/data/tunnel.log"
 )
 
+// extractToken 提取 Token：支持直接粘贴 Docker 命令或纯 Token
 func extractToken(input string) string {
 	if input == "" { return "" }
+	// 清理干扰字符
 	cleaned := regexp.MustCompile(`[\\\n\r\t\s]`).ReplaceAllString(input, "")
-	re := regexp.MustCompile(`eyJh[a-zA-Z0-9\-_]{50,}`)
+	// 匹配 Cloudflare Token 特有的 eyJh 开头格式
+	re := regexp.MustCompile(`[eE]yJh[a-zA-Z0-9\-_]{50,}`)
 	match := re.FindString(cleaned)
 	if match != "" { return match }
 	return strings.TrimSpace(input)
 }
 
+// getCurrentToken 获取当前 Token：环境变量优先，其次是本地文件
 func getCurrentToken() string {
 	if t := os.Getenv("token"); t != "" { return extractToken(t) }
 	if t := os.Getenv("TOKEN"); t != "" { return extractToken(t) }
@@ -58,12 +62,13 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 			}
 		} else if action == "start" && !isRunning {
 			tokenToRun := currentToken
+			// 如果没有环境变量且输入框有新内容，则更新并保存
 			if !hasEnv && rawInput != "" {
 				tokenToRun = extractToken(rawInput)
 				_ = ioutil.WriteFile(tokenPath, []byte(tokenToRun), 0644)
 			}
 			if tokenToRun != "" {
-				// 启动前先清空旧日志
+				// 启动前重置日志
 				_ = ioutil.WriteFile(logPath, []byte(""), 0644)
 				c := exec.Command("cloudflared", "tunnel", "--no-autoupdate", "run", "--token", tokenToRun)
 				f, _ := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
@@ -94,75 +99,83 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cloudflared 控制台</title>
+    <title>CF Tunnel Manager</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        :root { --accent: #f38020; --bg: #f4f7fb; }
+        :root { --accent: #f38020; --primary-grad: linear-gradient(135deg, #f38020 0%, #faad14 100%); }
         body { 
             margin: 0; min-height: 100vh; display: flex; justify-content: center; align-items: center;
-            background: radial-gradient(circle at top left, #e0e7ff, transparent 40%), radial-gradient(circle at bottom right, #ffedd5, transparent 40%);
-            background-color: var(--bg); font-family: -apple-system, sans-serif; 
+            background: radial-gradient(circle at 10% 20%, #e0e7ff 0%, transparent 40%),
+                        radial-gradient(circle at 90% 80%, #ffedd5 0%, transparent 40%), #f8fafc;
+            font-family: -apple-system, "PingFang SC", "SF Pro Display", sans-serif;
         }
-        .container { 
-            width: 90%; max-width: 400px; background: rgba(255,255,255,0.9); backdrop-filter: blur(20px);
-            border-radius: 32px; padding: 40px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.1); border: 1px solid #fff; text-align: center;
+        .glass-card { 
+            width: 90%; max-width: 400px; padding: 40px; background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(20px); border-radius: 35px; border: 1px solid rgba(255,255,255,0.5);
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.08); text-align: center;
         }
-        .status-pill { 
+        .status-badge { 
             display: inline-flex; align-items: center; gap: 8px; padding: 8px 20px; border-radius: 50px;
-            font-size: 13px; font-weight: 800; margin: 20px 0 30px; transition: 0.3s;
+            font-size: 13px; font-weight: 700; margin: 25px 0; transition: 0.3s;
         }
         .on { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
         .off { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
         .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
-        .on .dot { animation: blink 1s infinite; }
-        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .on .dot { animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.8); } }
+
+        .token-info { text-align: left; margin-bottom: 25px; }
+        .token-label { font-size: 11px; font-weight: 800; color: #94a3b8; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.5px; }
+        .token-view { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px; padding: 15px; font-family: monospace; font-size: 12px; word-break: break-all; color: #475569; line-height: 1.5; }
         
-        .token-area { text-align: left; margin-bottom: 25px; }
-        .label { font-size: 11px; font-weight: 800; color: #94a3b8; text-transform: uppercase; margin-bottom: 8px; padding-left: 5px; }
-        .token-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 16px; padding: 15px; font-family: monospace; font-size: 12px; word-break: break-all; color: #475569; }
-        textarea { width: 100%; border: 2px solid #e2e8f0; border-radius: 16px; padding: 15px; box-sizing: border-box; font-size: 13px; background: #fff; resize: none; margin-top: 5px; }
-        
-        button { 
-            width: 100%; border: none; border-radius: 18px; padding: 15px; font-weight: 700; cursor: pointer; 
-            display: flex; align-items: center; justify-content: center; gap: 10px; transition: 0.2s;
+        textarea { 
+            width: 100%; border: 2px solid #e2e8f0; border-radius: 18px; padding: 15px; box-sizing: border-box; 
+            font-size: 13px; background: #fff; resize: none; margin-top: 5px; transition: 0.3s;
         }
-        .btn-start { background: linear-gradient(135deg, #f38020, #faad14); color: white; box-shadow: 0 10px 20px rgba(243,128,32,0.2); }
-        .btn-stop { background: #fee2e2; color: #ef4444; }
-        .btn-save { background: #fff; color: #64748b; border: 1px solid #e2e8f0; margin-bottom: 10px; }
+        textarea:focus { outline: none; border-color: var(--accent); }
+
+        button { 
+            width: 100%; border: none; border-radius: 18px; padding: 16px; font-weight: 700; cursor: pointer; 
+            display: flex; align-items: center; justify-content: center; gap: 10px; transition: 0.2s; font-size: 15px;
+        }
+        .btn-run { background: var(--primary-grad); color: white; box-shadow: 0 10px 20px rgba(243,128,32,0.2); }
+        .btn-stop { background: #fee2e2; color: #ef4444; border: 1px solid #fecaca; }
+        .btn-save { background: white; color: #64748b; border: 1px solid #e2e8f0; margin-bottom: 12px; }
         button:active { transform: scale(0.97); }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="glass-card">
         <div style="font-size: 50px; color: var(--accent);"><i class="fa-brands fa-cloudflare"></i></div>
-        <h2 style="margin: 10px 0 5px;">Cloudflared</h2>
+        <h2 style="margin: 10px 0 5px; font-weight: 800; color: #1e293b;">隧道控制中心</h2>
         
-        <div class="status-pill {{if .IsRunning}}on{{else}}off{{end}}">
+        <div class="status-badge {{if .IsRunning}}on{{else}}off{{end}}">
             <div class="dot"></div>
-            {{if .IsRunning}}隧道已连接边缘网络{{else}}服务处于离线状态{{end}}
+            {{if .IsRunning}}TUNNEL ACTIVE{{else}}TUNNEL OFFLINE{{end}}
         </div>
 
         <form method="post">
             {{if not .IsRunning}}
-                <div class="token-area">
-                    <div class="label">{{if .HasEnv}}Environment Token{{else}}Current Configuration{{end}}</div>
-                    {{if .Token}}<div class="token-box">{{.Token}}</div>{{end}}
+                <div class="token-info">
+                    <div class="token-label">{{if .HasEnv}}环境变量模式{{else}}当前配置{{end}}</div>
+                    {{if .Token}}<div class="token-view">{{.Token}}</div>{{end}}
                     
                     {{if not .HasEnv}}
-                        <textarea name="raw_input" rows="3" placeholder="输入 Token 或 Docker run 命令..."></textarea>
+                        <textarea name="raw_input" rows="3" placeholder="在此粘贴 Token 或 Docker 命令..."></textarea>
                     {{end}}
                 </div>
                 
                 {{if not .HasEnv}}
-                    <button type="submit" name="action" value="save" class="btn-save"><i class="fa-solid fa-floppy-disk"></i> 保存本地配置</button>
+                    <button type="submit" name="action" value="save" class="btn-save"><i class="fa-solid fa-bookmark"></i> 保存本地配置</button>
                 {{end}}
-                <button type="submit" name="action" value="start" class="btn-start"><i class="fa-solid fa-bolt"></i> 启动隧道</button>
+                <button type="submit" name="action" value="start" class="btn-run"><i class="fa-solid fa-bolt"></i> 启动连接</button>
             {{else}}
-                <div style="margin-bottom: 30px; color: #94a3b8; font-size: 13px;">
-                    <i class="fa-solid fa-shield-halved"></i> 隧道加密传输中，配置已锁定
+                <div style="margin-bottom: 30px; padding: 20px; border-radius: 20px; background: rgba(243, 128, 32, 0.05); color: #64748b; font-size: 13px;">
+                    <i class="fa-solid fa-shield-check" style="color: var(--accent); font-size: 20px; margin-bottom: 10px; display: block;"></i>
+                    加密连接已建立，配置输入框已隐藏
                 </div>
                 <button type="submit" name="action" value="stop" class="btn-stop">
-                    <i class="fa-solid fa-power-off"></i> 断开隧道连接
+                    <i class="fa-solid fa-power-off"></i> 断开隧道
                 </button>
             {{end}}
         </form>
@@ -181,6 +194,6 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	_ = os.MkdirAll(dataDir, 0755)
 	http.HandleFunc("/", indexHandler)
-	fmt.Println("Secure Manager running on :12222")
+	fmt.Println("Ultra-light Manager running on :12222")
 	http.ListenAndServe(":12222", nil)
 }
