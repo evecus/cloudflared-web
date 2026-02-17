@@ -1,25 +1,25 @@
-# 使用特定的变量标识目标架构
-FROM --platform=$TARGETPLATFORM python:3.10-slim
+# 阶段 1: 编译 Go
+FROM golang:1.21-alpine AS builder
+WORKDIR /build
+COPY main.go .
+RUN go build -ldflags="-s -w" -o tunnel-manager main.go
 
-# 声明变量以便在构建中使用
+# 阶段 2: 最终镜像
+FROM alpine:latest
 ARG TARGETARCH
 
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+# [span_3](start_span)安装运行环境所需的最小依赖[span_3](end_span)
+RUN apk add --no-cache ca-certificates curl
 
-# 根据 TARGETARCH (由 Buildx 自动传入) 下载对应版本
-RUN if [ "$TARGETARCH" = "amd64" ]; then \
-        URL="amd64"; \
-    elif [ "$TARGETARCH" = "arm64" ]; then \
-        URL="arm64"; \
-    elif [ "$TARGETARCH" = "arm" ]; then \
-        URL="arm"; \
-    fi && \
+# [span_4](start_span)[span_5](start_span)下载 cloudflared 二进制[span_4](end_span)[span_5](end_span)
+RUN if [ "$TARGETARCH" = "amd64" ]; then URL="amd64"; \
+    elif [ "$TARGETARCH" = "arm64" ]; then URL="arm64"; \
+    else URL="arm"; fi && \
     curl -L "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${URL}" -o /usr/local/bin/cloudflared && \
     chmod +x /usr/local/bin/cloudflared
 
 WORKDIR /app
-RUN pip install --no-cache-dir flask
-COPY app.py .
+COPY --from=builder /build/tunnel-manager .
 
-EXPOSE 1450
-CMD ["python", "app.py"]
+EXPOSE 12222
+CMD ["./tunnel-manager"]
