@@ -40,16 +40,13 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 	isRunning := tunnelCmd != nil && tunnelCmd.Process != nil && tunnelCmd.ProcessState == nil
 	mu.Unlock()
 
-	// 强制模式切换逻辑
+	// 核心逻辑判断
 	isModifying := r.URL.Query().Get("edit") == "true"
 	currentToken := getStoredToken()
 	hasToken := currentToken != ""
-	envToken := os.Getenv("token")
-	if envToken == "" { envToken = os.Getenv("TOKEN") }
-	hasEnv := envToken != ""
-
-	message := ""
-	msgType := ""
+	
+	message := r.URL.Query().Get("msg")
+	msgType := r.URL.Query().Get("type")
 
 	if r.Method == "POST" {
 		action := r.FormValue("action")
@@ -62,12 +59,13 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 				_ = os.MkdirAll(dataDir, 0755)
 				err := ioutil.WriteFile(tokenPath, []byte(token), 0644)
 				if err == nil {
-					message, msgType, currentToken, hasToken = "配置保存成功", "success", token, true
-				} else {
-					message, msgType = "配置保存失败", "error"
+					// 保存成功后，重定向到不带 edit=true 的页面，回到界面二
+					http.Redirect(w, r, "/?msg=配置保存成功&type=success", http.StatusSeeOther)
+					return
 				}
+				message, msgType = "配置保存失败", "error"
 			} else {
-				message, msgType = "保存失败：未检测到有效 Token", "error"
+				message, msgType = "未检测到有效Token", "error"
 			}
 		case "start":
 			if hasToken && !isRunning {
@@ -79,6 +77,8 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 					isRunning = true
 				}
 			}
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+			return
 		case "stop":
 			mu.Lock()
 			if tunnelCmd != nil && tunnelCmd.Process != nil {
@@ -88,9 +88,6 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 			}
 			mu.Unlock()
 			isRunning = false
-		}
-		// 如果是保存成功，不重定向以显示消息；否则重定向清空 POST
-		if action != "save" {
 			http.Redirect(w, r, "/", http.StatusSeeOther)
 			return
 		}
@@ -103,49 +100,54 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
     <title>CF Tunnel Manager</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        :root { --accent: #f38020; --bg: #f4f7fb; --primary-grad: linear-gradient(135deg, #f38020 0%, #faad14 100%); }
+        :root { --accent: #f38020; --primary-grad: linear-gradient(135deg, #f38020 0%, #faad14 100%); }
         body { 
             margin: 0; min-height: 100vh; display: flex; justify-content: center; align-items: center;
             background: radial-gradient(circle at 15% 15%, #e0e7ff, transparent 45%), radial-gradient(circle at 85% 85%, #ffedd5, transparent 45%), #f8fafc;
             font-family: -apple-system, "PingFang SC", sans-serif;
         }
         .card { 
-            width: 90%; max-width: 400px; padding: 45px 30px; background: rgba(255,255,255,0.85);
-            backdrop-filter: blur(20px); border-radius: 35px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.1); border: 1px solid #fff; text-align: center;
+            width: 90%; max-width: 420px; padding: 45px 30px; background: rgba(255,255,255,0.85);
+            backdrop-filter: blur(25px); border-radius: 35px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.1); border: 1px solid #fff; text-align: center;
         }
-        .status-pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 20px; border-radius: 50px; font-size: 12px; font-weight: 800; margin-bottom: 30px; }
+        .status-pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 22px; border-radius: 50px; font-size: 13px; font-weight: 800; margin-bottom: 30px; }
         .on { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
         .off { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
         .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
         .on .dot { animation: blink 1s infinite; }
         @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
-        .token-view { background: rgba(248,250,252,0.8); border: 1px solid #e2e8f0; border-radius: 18px; padding: 18px; font-family: monospace; font-size: 12px; word-break: break-all; color: #475569; text-align: left; margin-bottom: 25px; line-height: 1.5; }
-        textarea { width: 100%; border: 2px solid #e2e8f0; border-radius: 20px; padding: 18px; box-sizing: border-box; font-size: 13px; background: #fff; resize: none; margin-bottom: 25px; transition: 0.3s; }
-        textarea:focus { outline: none; border-color: var(--accent); }
+        .token-view { background: rgba(248,250,252,0.9); border: 1px solid #e2e8f0; border-radius: 20px; padding: 20px; font-family: monospace; font-size: 13px; word-break: break-all; color: #475569; text-align: left; margin-bottom: 25px; line-height: 1.6; }
+        textarea { width: 100%; border: 2px solid #e2e8f0; border-radius: 20px; padding: 20px; box-sizing: border-box; font-size: 14px; background: #fff; resize: none; margin-bottom: 25px; transition: 0.3s; }
+        textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px rgba(243,128,32,0.1); }
 
-        .btn-group { display: flex; gap: 12px; }
+        .btn-group { display: flex; gap: 15px; }
         button, .btn-link { 
-            flex: 1; border: none; border-radius: 18px; padding: 16px; font-weight: 800; cursor: pointer; 
-            display: flex; align-items: center; justify-content: center; gap: 8px; transition: 0.2s; font-size: 14px; text-decoration: none;
+            flex: 1; height: 55px; border: none; border-radius: 18px; font-weight: 800; cursor: pointer; 
+            display: flex; align-items: center; justify-content: center; gap: 10px; transition: all 0.2s; font-size: 15px; text-decoration: none; box-sizing: border-box;
         }
-        .btn-main { background: var(--primary-grad); color: white; box-shadow: 0 10px 20px rgba(243,128,32,0.2); }
-        .btn-sub { background: white; color: #64748b; border: 1px solid #e2e8f0; }
-        .btn-stop { width: 100%; background: #fee2e2; color: #ef4444; border: 1px solid #fecaca; }
+        /* 启动/保存：主色调 */
+        .btn-main { background: var(--primary-grad); color: white; box-shadow: 0 8px 15px rgba(243,128,32,0.2); }
+        /* 修改：次色调，大小与启动相同 */
+        .btn-edit { background: #eff6ff; color: #2563eb; border: 1.5px solid #dbeafe; }
+        .btn-stop { width: 100%; background: #fee2e2; color: #ef4444; border: 1.5px solid #fecaca; }
+        
+        button:hover, .btn-link:hover { transform: translateY(-2px); filter: brightness(1.05); }
         button:active { transform: scale(0.96); }
 
-        .msg { margin-top: 15px; font-size: 13px; font-weight: 700; padding: 10px; border-radius: 12px; }
-        .msg-success { color: #15803d; background: #f0fdf4; }
-        .msg-error { color: #b91c1c; background: #fef2f2; }
+        .msg { margin-top: 20px; font-size: 14px; font-weight: 700; padding: 12px; border-radius: 15px; animation: slideUp 0.3s; }
+        .msg-success { color: #15803d; background: #f0fdf4; border: 1px solid #bbf7d0; }
+        .msg-error { color: #b91c1c; background: #fef2f2; border: 1px solid #fecaca; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
     <div class="card">
-        <div style="font-size: 50px; color: var(--accent);"><i class="fa-brands fa-cloudflare"></i></div>
-        <h2 style="margin: 10px 0 25px;">隧道控制中心</h2>
+        <div style="font-size: 55px; color: var(--accent);"><i class="fa-brands fa-cloudflare"></i></div>
+        <h2 style="margin: 10px 0 25px; font-weight: 900;">隧道管理中心</h2>
 
         <div class="status-pill {{if .IsRunning}}on{{else}}off{{end}}">
-            <div class="dot"></div> {{if .IsRunning}}已加密连接{{else}}隧道未运行{{end}}
+            <div class="dot"></div> {{if .IsRunning}}TUNNEL ACTIVE{{else}}TUNNEL OFFLINE{{end}}
         </div>
 
         <form method="post">
@@ -158,7 +160,7 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
             {{else}}
                 <div class="token-view">{{.Token}}</div>
                 <div class="btn-group">
-                    <a href="/?edit=true" class="btn-sub"><i class="fa-solid fa-pen-to-square"></i> 修改配置</a>
+                    <a href="/?edit=true" class="btn-link btn-edit"><i class="fa-solid fa-pen-to-square"></i> 修改配置</a>
                     <button type="submit" name="action" value="start" class="btn-main"><i class="fa-solid fa-bolt"></i> 启动连接</button>
                 </div>
             {{end}}
@@ -174,7 +176,6 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 		"IsRunning":   isRunning,
 		"Token":       currentToken,
 		"HasToken":    hasToken,
-		"HasEnv":      hasEnv,
 		"IsModifying": isModifying,
 		"Message":     message,
 		"MsgType":     msgType,
@@ -184,6 +185,6 @@ func indexHandler(w http.ResponseWriter, r *http.Request) {
 func main() {
 	_ = os.MkdirAll(dataDir, 0755)
 	http.HandleFunc("/", indexHandler)
-	fmt.Println("Dynamic Manager running on :12222")
+	fmt.Println("Tunnel Manager running on :12222")
 	http.ListenAndServe(":12222", nil)
 }
