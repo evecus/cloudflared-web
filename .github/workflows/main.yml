@@ -31,6 +31,12 @@ jobs:
         with:
           go-version: '1.22'
 
+      - name: Ensure go.mod exists
+        run: |
+          if [ ! -f go.mod ]; then
+            go mod init cloudflared-web
+          fi
+
       - name: Build binary
         env:
           GOOS: ${{ matrix.goos }}
