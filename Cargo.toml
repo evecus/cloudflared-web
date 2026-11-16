@@ -1,0 +1,13 @@
+[package]
+name = "cloudflared-web"
+version = "0.1.0"
+edition = "2021"
+description = "A small Web UI to manage a Cloudflare Tunnel (cloudflared), rewritten in Rust."
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "sync", "time", "net"] }
+regex = "1"
+subtle = "2"
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
