@@ -11,3 +11,9 @@ regex = "1"
 subtle = "2"
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+opt-level = 2
+debug = false
+strip = true
+panic = "abort"
